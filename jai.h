@@ -92,6 +92,7 @@ struct Config {
   std::vector<path> script_inputs_;
   std::string shellcmd_;
   PathSet mask_files_;
+  PathSet mask_abs_;
   bool mask_warn_{};
   bool parsing_config_file_{};
 

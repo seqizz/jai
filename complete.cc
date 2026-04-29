@@ -138,8 +138,12 @@ Config::complete(Completions c)
     complete_path(AT_FDCWD, cs, kAny);
   else if (std::ranges::contains(std::array{"--initjail", "--initjail?"}, opt))
     complete_path(AT_FDCWD, cs, kExec);
-  else if (std::ranges::contains(std::array{"--mask", "--unmask"}, opt))
-    complete_path(home(), cs, kAny);
+  else if (std::ranges::contains(std::array{"--mask", "--unmask"}, opt)) {
+    if (c.arg().starts_with("/"))
+      complete_path(AT_FDCWD, cs, kDir);
+    else
+      complete_path(home(), cs, kAny);
+  }
   else if (std::ranges::contains(std::array{"-C", "--conf", "--conf?"}, opt))
     complete_config(home_jai(), cs, ".conf");
   else if (std::ranges::contains(std::array{"-j", "--jail"}, opt))

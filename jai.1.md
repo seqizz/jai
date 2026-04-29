@@ -432,25 +432,34 @@ descriptors will be scrubbed by default in sandboxes.
   file.
 
 `--mask` *file*
-: When creating an overlay home directory, create a "whiteout" file to
-  hide *file* in the jail.  *file* must be a relative path and is
-  always relative to your home directory, regardless of where you run
-  jai.  You can specify this option multiple times.  An easier way to
-  hide files is just to delete them from `/run/jai/$USER/*.home`;
-  hence, this option is mostly useful in configuration files to
-  specify a set of files to delete by default.  If you add `mask`
-  directives to your configuration file, you will need to clear mounts
-  with `jai -u` before the changes take effect.
+: Hide *file* from jailed processes.  If *file* is a relative path, it
+  is interpreted relative to your home directory and creates an
+  overlayfs whiteout to hide *file* when creating an overlay home
+  directory.  An easier way to hide files is just to delete them from
+  `/run/jai/$USER/*.home`; hence, this option is mostly useful in
+  configuration files to specify a set of files to hide by default.
+  If you add relative `mask` directives to your configuration file,
+  you will need to clear mounts with `jai -u` before the changes take
+  effect.
+
+    If *file* is an absolute path, the directory at that path is hidden
+  by mounting an empty read-only directory over it.  Absolute path
+  masking works in all modes and is applied each time the jail starts.
+  Currently, only directories can be masked with absolute paths;
+  nonexistent paths are silently ignored.
+
+  You can specify this option multiple times.
 
 `--unmask` *file*
-: Reverse the effects of a previous `--mask` option.  This does not
-  unmask files that have already been masked in an existing jail.  For
-  that, you need to go into `$HOME/.jai/`*name*`.changes` and manually
-  remove the whiteout files.  It also does nothing if you have masked
-  a parent directory of *file*.  The main utility of this option is to
-  reverse `mask` lines in a configuration file.  For instance, you can
-  include a default set of masked files with a `conf` option and then
-  surgically remove individual masked files that you want to expose.
+: Reverse the effects of a previous `--mask` option.  For relative
+  paths, this does not unmask files that have already been masked in an
+  existing jail.  For that, you need to go into
+  `$HOME/.jai/`*name*`.changes` and manually remove the whiteout
+  files.  It also does nothing if you have masked a parent directory of
+  *file*.  The main utility of this option is to reverse `mask` lines
+  in a configuration file.  For instance, you can include a default
+  set of masked files with a `conf` option and then surgically remove
+  individual masked files that you want to expose.
 
 `--unsetenv` *var*
 : Filters *var* from the environment of the jailed program.  Can be

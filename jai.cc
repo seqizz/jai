@@ -615,6 +615,61 @@ Config::make_mnt_ns()
     }
   }
 
+  // Mount writable empty tmpfs over absolute mask paths before grants,
+  // so the grant loop can naturally create subdirectory stubs and mount
+  // on top.  Sealed read-only after grants are mounted.
+  for (const auto &mp : mask_abs_) {
+    auto restore_root = asuser(sbcred);
+    Fd target = openat(AT_FDCWD, mp.c_str(), O_DIRECTORY | O_RDONLY);
+    if (!target)
+      continue;
+    restore_root.reset();
+
+    if (mode_ != kCasual) {
+      struct stat sbold, sbnew = xfstat(*target);
+      xsetns(*oldns, CLONE_NEWNS);
+      int staterr = stat(mp.c_str(), &sbold);
+      xsetns(*newns, CLONE_NEWNS);
+      if (staterr || sbold.st_ino != sbnew.st_ino ||
+          sbold.st_dev != sbnew.st_dev)
+        continue;
+    }
+
+    check_user(*target, mp, true);
+    // Fresh empty tmpfs — avoids depending on /run/jai being empty.
+    // Writable for now so grants can create subdirectory stubs underneath.
+    // Sealed read-only after grants are mounted.
+    Fd source = make_tmpfs(std::format("jai-mask:{}", mp.string()).c_str());
+    xmnt_propagate(*source, MS_PRIVATE, false);
+    xmnt_move(*source, *target);
+    // The cloned empty dir inherits /run/jai's 0700 permissions.
+    // Make it traversable so the grant loop can resolve paths through it.
+    {
+      Fd mp_fd = xopenat(-1, mp, O_DIRECTORY | O_RDONLY | O_CLOEXEC);
+      fchmod(*mp_fd, 0755);
+      // Own mask tmpfs as user so grant loop's check_user() passes.
+      fchown(*mp_fd, user_cred_.uid_, user_cred_.gid_);
+    }
+
+    // Pre-create directory stubs for any grants under this mask so the
+    // grant loop's openat() succeeds without needing special handling.
+    for (const auto &df : grant_directories_) {
+      path d = df.first;
+      if (d.is_relative())
+        d = "/" / d;
+      if (mp == d)
+        warn("--mask {} also hides granted directory {}", mp.string(),
+             d.string());
+      else if (contains(mp, d)) {
+        Fd cur = xopenat(-1, mp, O_DIRECTORY | O_RDONLY | O_CLOEXEC);
+        for (const auto &comp : d.lexically_relative(mp)) {
+          cur = ensure_dir(*cur, comp, 0755, kNoFollow, true);
+          fchown(*cur, user_cred_.uid_, user_cred_.gid_);
+        }
+      }
+    }
+  }
+
   for (const auto &df : grant_directories_) {
     path d = df.first;
     auto flags = df.second;
@@ -690,6 +745,13 @@ Config::make_mnt_ns()
   blockdir(storagedir_);
   if (homejaipath_ != storagedir_)
     blockdir(homejaipath_);
+
+  // Seal absolute mask mounts as read-only now that grants are in place.
+  for (const auto &mp : mask_abs_) {
+    Fd fd = openat(-1, mp.c_str(), O_DIRECTORY | O_RDONLY | O_CLOEXEC);
+    if (fd)
+      xmnt_setattr(*fd, mount_attr{.attr_set = MOUNT_ATTR_RDONLY}, 0);
+  }
 
   return newns;
 }
@@ -1285,15 +1347,20 @@ Config::opt_parser(bool dotjail)
       [this](std::string_view arg) {
         path p(expand(arg));
         if (p.is_absolute())
-          err<Options::Error>("{}: cannot mask an absolute path", p.string());
-        mask_files_.emplace(std::move(p));
+          mask_abs_.emplace(std::move(p));
+        else
+          mask_files_.emplace(std::move(p));
       },
-      "Erase $HOME/FILE when first creating overlay home", "FILE");
+      "Hide FILE from jail (relative to $HOME, or absolute path for directories)",
+      "FILE");
   opts(
       "--unmask",
       [this](std::string_view arg) {
         path p(expand(arg));
-        mask_files_.erase(p);
+        if (p.is_absolute())
+          mask_abs_.erase(p);
+        else
+          mask_files_.erase(p);
       },
       "Undo the effects of a previous --mask option", "FILE");
   opts(

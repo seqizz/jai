@@ -37,3 +37,24 @@ capture_in_dir "$WORKDIR" run_jai -C mask-off /bin/sh -c '[ -e "$1" ] && printf 
 assert_status 0
 assert_eq "$CAPTURE_STDOUT" "visible"
 assert_file_equals "$TARGET_PATH" "mask-me"
+
+# --- Absolute path masking (directories) ---
+
+ABS_TARGET=/tmp/jai-mask-abs-$$
+register_cleanup_path "$ABS_TARGET"
+mkdir -p "$ABS_TARGET"
+echo "sensitive" > "$ABS_TARGET/secret"
+
+# Absolute mask should hide the directory
+cleanup_jai
+capture_in_dir "$WORKDIR" run_jai -C mask-on --mask "$ABS_TARGET" /bin/sh -c \
+    '[ -d "$1" ] && printf visible || printf hidden' sh "$ABS_TARGET"
+assert_status 0
+assert_eq "$CAPTURE_STDOUT" "hidden"
+
+# Absolute unmask should reverse
+cleanup_jai
+capture_in_dir "$WORKDIR" run_jai -C mask-on --mask "$ABS_TARGET" --unmask "$ABS_TARGET" /bin/sh -c \
+    '[ -d "$1" ] && printf visible || printf hidden' sh "$ABS_TARGET"
+assert_status 0
+assert_eq "$CAPTURE_STDOUT" "visible"
